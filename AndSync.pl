@@ -32,7 +32,7 @@
 #   Date           Version    Author   Comments
 ###############################################################################
 #   28.08.2012     1.0        WiZarD   Initial version
-#
+#   13.08.2012     1.1        WiZarD   New features and bug fixes
 ###############################################################################
 
 use strict;
@@ -64,9 +64,11 @@ struct Settings => {
     BackupData => '$',
     RestoreSystemApps => '$',
     RestoreData => '$',
+    RemoveData => '$',
     SyncMissing => '$',
     DeleteSyncData => '$',
     DeleteCompleted => '$',
+    InstallSD => '$',
     ConfirmActions => '$',
 };
 
@@ -102,7 +104,7 @@ my $choice = " ";
 # Print out a banner for information
 sub PrintBanner
 {
-    print "\nAndSync v1.0 - Sync your Andorid devices";
+    print "\nAndSync v1.1 - Sync your Andorid devices";
     print "\nCopyright (C) 2012, Winny Mathew Kurian (WiZarD)\n";
 }
 
@@ -136,6 +138,10 @@ if (-e $LOG_FILE)
     system ("echo \"\" > $LOG_FILE");
 }
 
+sub isNumber {
+    $_[0] =~ /^([+-]?)(?=\d|\.\d)\d*(\.\d*)?([Ee]([+-]?\d+))?$/;
+}
+
 # This is the main loop for the MAIN menu
 while(1) {
     DisplayDevices();
@@ -145,14 +151,16 @@ while(1) {
     print "1. Sync application between devices\n";
     print "2. Backup applications\n";
     print "3. Restore applications\n";
-    print "4. Restart ADB server\n";
-    print "5. Refresh device list\n";
-    print "6. Settings\n";
-    print "\n[0-6]> ";
+    print "4. Uninstall applications\n";
+    print "5. Restart ADB server\n";
+    print "6. Refresh device list\n";
+    print "7. Settings\n";
+    print "\n[0-7]> ";
 
     chomp($choice = <STDIN>);
-    if ($choice lt "0" || $choice gt "6") {
-        print "\nPlease enter a menu option (0-6)\n";
+    redo if not isNumber($choice);
+    if ($choice < 0 || $choice > 7) {
+        print "\nPlease enter a menu option (0-7)\n";
         redo;
     }
 
@@ -201,15 +209,26 @@ while(1) {
         }
     }
     elsif ($choice == 4) {
+        if ($ADB_DEVICES_COUNT < 1) {
+            print "\nPlease connect an Android device.\n";
+            redo;
+        }
+
+        $DEVICE = SelectDevice("\nSelect a device to uninstall applications");
+        if ($DEVICE >= 0) {
+            UninstallApps($ADB_DEVICES[$DEVICE]->serial);
+        }
+    }
+    elsif ($choice == 5) {
         print "\n";
         system("adb kill-server");
         system("adb start-server");
     }
-    elsif ($choice == 5) {
+    elsif ($choice == 6) {
         undef @ADB_DEVICES;
         RefreshDeviceList();
     }
-    elsif ($choice == 6) {
+    elsif ($choice == 7) {
         SettingsMain();
     }
 }
@@ -223,9 +242,11 @@ sub WriteSettings
     print hSettingsFile "BackupData=" . $settings->BackupData . "\n";
     print hSettingsFile "RestoreSystemApps=" . $settings->RestoreSystemApps . "\n";
     print hSettingsFile "RestoreData=" . $settings->RestoreData . "\n";
+    print hSettingsFile "RemoveData=" . $settings->RemoveData . "\n";
     print hSettingsFile "SyncMissing=" . $settings->SyncMissing . "\n";
     print hSettingsFile "DeleteSyncData=" . $settings->DeleteSyncData . "\n";
     print hSettingsFile "DeleteCompleted=" . $settings->DeleteCompleted . "\n";
+    print hSettingsFile "InstallSD=" . $settings->InstallSD . "\n";
     print hSettingsFile "ConfirmActions=" . $settings->ConfirmActions . "\n";
 
     close (hSettingsFile);
@@ -235,22 +256,25 @@ sub WriteSettings
 sub SettingsMain
 {
     while(1) {
-        print "\n================== SETTINGS ===================\n\n";
-        print "0. Back\n";
-        printf "1. Backup system applications       [%4s ]\n", $settings->BackupSystemApps ? "Yes" : "No";
-        printf "2. Backup data on rooted devices    [%4s ]\n", $settings->BackupData ? "Yes" : "No";
-        printf "3. Restore system applications      [%4s ]\n", $settings->RestoreSystemApps ? "Yes" : "No";
-        printf "4. Restore data on rooted devices   [%4s ]\n", $settings->RestoreData ? "Yes" : "No";
-        printf "5. Sync missing applications        [%4s ]\n", $settings->SyncMissing ? "Yes" : "No";
-        printf "6. Delete sync data on exit         [%4s ]\n", $settings->DeleteSyncData ? "Yes" : "No";
-        printf "7. Delete package once installed    [%4s ]\n", $settings->DeleteCompleted ? "Yes" : "No";
-        printf "8. Confirm all actions              [%4s ]\n", $settings->ConfirmActions ? "Yes" : "No";
-        printf "9. About AndSync\n";
-        printf "\n[0-9]> ";
+        printf "\n================== SETTINGS ===================\n\n";
+        printf " 0. Back\n";
+        printf " 1. Backup system applications       [%4s ]\n", $settings->BackupSystemApps ? "Yes" : "No";
+        printf " 2. Backup data on rooted devices    [%4s ]\n", $settings->BackupData ? "Yes" : "No";
+        printf " 3. Restore system applications      [%4s ]\n", $settings->RestoreSystemApps ? "Yes" : "No";
+        printf " 4. Restore data on rooted devices   [%4s ]\n", $settings->RestoreData ? "Yes" : "No";
+        printf " 5. Remove data while un-installing  [%4s ]\n", $settings->RemoveData ? "Yes" : "No";
+        printf " 6. Sync missing applications        [%4s ]\n", $settings->SyncMissing ? "Yes" : "No";
+        printf " 7. Delete sync data on exit         [%4s ]\n", $settings->DeleteSyncData ? "Yes" : "No";
+        printf " 8. Delete package once installed    [%4s ]\n", $settings->DeleteCompleted ? "Yes" : "No";
+        printf " 9. Install apps on SD Card          [%4s ]\n", $settings->InstallSD ? "Yes" : "No";
+        printf "10. Confirm all actions              [%4s ]\n", $settings->ConfirmActions ? "Yes" : "No";
+        printf "11. About AndSync\n";
+        printf "\n[0-11]> ";
 
         chomp($choice = <STDIN>);
-        if ($choice lt "0" || $choice gt "9") {
-            print "\nPlease enter a menu option (0-9)\n";
+        redo if not isNumber($choice);
+        if ($choice < 0 || $choice > 11) {
+            print "\nPlease enter a menu option (0-11)\n";
             redo;
         }
 
@@ -272,18 +296,24 @@ sub SettingsMain
             $settings->RestoreData($settings->RestoreData ? 0 : 1);
         }
         elsif ($choice == 5) {
-            $settings->SyncMissing($settings->SyncMissing ? 0 : 1);
+            $settings->RemoveData($settings->RemoveData ? 0 : 1);
         }
         elsif ($choice == 6) {
-            $settings->DeleteSyncData($settings->DeleteSyncData ? 0 : 1);
+            $settings->SyncMissing($settings->SyncMissing ? 0 : 1);
         }
         elsif ($choice == 7) {
-            $settings->DeleteCompleted($settings->DeleteCompleted ? 0 : 1);
+            $settings->DeleteSyncData($settings->DeleteSyncData ? 0 : 1);
         }
         elsif ($choice == 8) {
-            $settings->ConfirmActions($settings->ConfirmActions ? 0 : 1);
+            $settings->DeleteCompleted($settings->DeleteCompleted ? 0 : 1);
         }
         elsif ($choice == 9) {
+            $settings->InstallSD($settings->InstallSD ? 0 : 1);
+        }
+        elsif ($choice == 10) {
+            $settings->ConfirmActions($settings->ConfirmActions ? 0 : 1);
+        }
+        elsif ($choice == 11) {
             # Open self and print out GNU Copyright notice
             open SELF, __FILE__ or redo;
             while (<SELF>) {
@@ -408,7 +438,7 @@ sub BackupDevice
 
     RetriveDeviceReport($SERIAL);
 
-    my %phashMaster = ParseADBReport("$SYNC_DIRECTORY/$SERIAL.txt");
+    my %phashMaster = ParseADBReport($SERIAL);
     $nPackages = scalar(keys(%phashMaster));
 
     print "\nFound $nPackages applications in $SERIAL\n";
@@ -423,27 +453,46 @@ sub BackupDevice
 sub RestoreDevice
 {
     $SERIAL = shift;
+    my $DIR = $SERIAL;
+
     my $nPackages = 0;
     my $nPackagesDone = 0;
     my $packageBaseName;
+    my @apk_files;
 
     return if ($ADB_DEVICES_COUNT < 1);
 
-    if (not -d "$BACKUP_DIRECTORY/$SERIAL") {
-        print "\nNo backup data found for $SERIAL\n";
-        return;
+    while (1) {
+        while (1) {
+            if (not -d "$BACKUP_DIRECTORY/$DIR/") {
+                print "\nNo backup data found for $DIR\n";
+
+                if (ConfirmPrompt("\nWould you like to restore from another device")) {
+                    print "\nEnter serial number of the device: ";
+                    chomp($DIR = <STDIN>);
+
+                    return if (not $DIR);
+                    redo;
+                } else {
+                    return;
+                }
+            }
+        }
+
+        # This will get us file names with path
+        @apk_files = glob "$BACKUP_DIRECTORY/$DIR/*.apk";
+        $nPackages = scalar(@apk_files);
+
+        if ($nPackages < 1) {
+            print "\nThere are no packages to restore.\n";
+            redo;
+        } else {
+            last;
+        }
     }
 
     my $rooted = isDeviceRooted($SERIAL);
-
-    # This will get us file names with path
-    my @apk_files = glob "$BACKUP_DIRECTORY/$SERIAL/*.apk";
-    $nPackages = scalar(@apk_files);
-
-    if ($nPackages < 1) {
-        print "\nThere are packages to restore.\n";
-        return;
-    }
+    my $installSD = $settings->InstallSD ? "-s" : "";
 
     print "\nFound $nPackages packages to restore\n";
     if (ConfirmPrompt("\nProceed with restore")) {
@@ -456,7 +505,7 @@ sub RestoreDevice
             $packageBaseName =~ s/\.[^.]+$//;
 
             print "\nRestoring $packageBaseName\n";
-            system("adb -s $SERIAL install $packageName");
+            system("adb -s $SERIAL install $installSD $packageName");
 
             if ($rooted && $settings->RestoreData) {
                 print "\nRestoring data for $packageBaseName\n";
@@ -467,7 +516,7 @@ sub RestoreDevice
                 # Extract the package data
                 print "\nExtracting data...\n";
                 my $zip = Archive::Zip->new("$packageName.zip");
-                $zip->extractTree("", "$BACKUP_DIRECTORY/$SERIAL/");
+                $zip->extractTree("", "$BACKUP_DIRECTORY/$DIR/");
 
                 # FIXME: We have not preserved any metadata for restore, hence data path is hardcoded for now
                 system("adb -s $SERIAL push $packageName /data/data/$packageBaseName");
@@ -484,6 +533,29 @@ sub RestoreDevice
     }
 }
 
+sub UninstallApps
+{
+    $SERIAL = shift;
+
+    my $nPackages = 0;
+    my $nPackagesDone = 0;
+
+    return if ($ADB_DEVICES_COUNT < 1);
+
+    RetriveDeviceReport($SERIAL);
+
+    my %phashUninstall = ParseADBReport($SERIAL);
+    $nPackages = scalar(keys(%phashUninstall));
+
+    print "\nFound $nPackages applications in $SERIAL to uninstall\n";
+    if (ConfirmPrompt("\nProceed with Uninstall")) {
+        $nPackagesDone = UninstallPackages(\%phashUninstall, $SERIAL);
+    }
+
+    print "\nTotal $nPackages packages. $nPackagesDone packages were unistalled. " . 
+          ($nPackages - $nPackagesDone) . " packages were ignored.\n";
+}
+
 sub ConfirmPrompt
 {
     my $PROMPT = $_[0];
@@ -494,12 +566,12 @@ sub ConfirmPrompt
     }
 
     while (1) {
-        print "$PROMPT ([Y]es/[N]o): ";
+        print "$PROMPT (Yes/No): ";
         $choice = <STDIN>;
         chomp ($choice);
 
-        if ($choice eq 'Y' || $choice eq 'N') {
-            return $choice eq 'Y' ? 1 : 0;
+        if (not $choice =~ /^YN/i) {
+            return ($choice =~ /^Y/i) ? 1 : 0;
         } else {
             next;
         }
@@ -560,10 +632,10 @@ sub SyncDevices
     RetriveDeviceReport($SERIAL_DEVICE_MASTER);
     RetriveDeviceReport($SERIAL_DEVICE_SLAVE);
 
-    my %phashMaster = ParseADBReport("$SYNC_DIRECTORY/$SERIAL_DEVICE_MASTER.txt");
+    my %phashMaster = ParseADBReport($SERIAL_DEVICE_MASTER);
     print "\nFound " . scalar(keys(%phashMaster)) . " applications in $SERIAL_DEVICE_MASTER\n";
 
-    my %phashSlave = ParseADBReport("$SYNC_DIRECTORY/$SERIAL_DEVICE_SLAVE.txt");
+    my %phashSlave = ParseADBReport($SERIAL_DEVICE_SLAVE);
     print "Found " . scalar(keys(%phashSlave)) . " applications in $SERIAL_DEVICE_SLAVE\n\n";
 
     my %phashUpdate = ResolvePackageSync(\%phashMaster, \%phashSlave);
@@ -591,6 +663,7 @@ sub PushPackages
     my $nPackagesDone = 0;
     my $dataPath;
     my $rooted = isDeviceRooted($SERIAL_DEVICE_MASTER);
+    my $installSD = $settings->InstallSD ? "-s" : "";
 
     while(my ($packageName, $packageUpdate) = each(%phashUpdate)) {
         if (ConfirmPrompt("Update $packageName")) {
@@ -600,7 +673,7 @@ sub PushPackages
             }
 
             print "\nUpdating $packageName\n";
-            system("adb -s $SERIAL_DEVICE_SLAVE install -r $DIRECTORY/$SERIAL_DEVICE_MASTER/$packageName.apk");
+            system("adb -s $SERIAL_DEVICE_SLAVE install -r $installSD $DIRECTORY/$SERIAL_DEVICE_MASTER/$packageName.apk");
 
             # Now restore data if the device is rooted
             if ($rooted && $settings->RestoreData) {
@@ -678,17 +751,56 @@ sub PullPackages
     return $nPackages;
 }
 
-# This sub routine can be removed if we convert device structure to
-# a hash but then we need to map UI to device hash, so leaving this
-# as is for now.
-sub isDeviceRooted
+sub UninstallPackages
+{
+    my $params = shift;
+    my %phashUninstall = %$params;
+    $SERIAL = shift;
+
+    my $nPackagesDone = 0;
+
+    # Delete data if the user wishes so
+    my $KeepData = ($settings->RemoveData) ? "" : "-k";
+
+    while(my ($packageName, $packageUninstall) = each(%phashUninstall)) {
+        if (ConfirmPrompt("Uninstall $packageName")) {
+            # We do not un-install system apps!
+            next if isSystemApp($packageName);
+
+            print "\nUn-installing $packageName\n";
+            system("adb -s $SERIAL uninstall $KeepData $packageName");
+
+            $nPackagesDone++;
+        }
+    }
+
+    return $nPackagesDone;
+}
+
+#
+# All main subroutines are written so that it accepts a serial number as
+# input. This is done to support command line features and automation in
+# future versions.
+#
+# This sub routine can be removed if we convert device structure to a hash
+# but then we need to map UI to device hash, so leaving this as is for now.
+#
+sub GetDeviceProperty
 {
     $SERIAL = shift;
+    my $KEY = shift;
 
     foreach my $device (@ADB_DEVICES) {
         next if ($device->serial ne $SERIAL);
-        return $device->rooted;
+        return $device->$KEY;
     }
+}
+
+# Check if the device is rooted
+sub isDeviceRooted
+{
+    $SERIAL = shift;
+    return GetDeviceProperty($SERIAL, "rooted");
 }
 
 sub ResolvePackageSync
@@ -749,9 +861,11 @@ sub ParseSettings
         $settings->BackupData(1);
         $settings->RestoreSystemApps(0);
         $settings->RestoreData(0);
+        $settings->RemoveData(0);
         $settings->SyncMissing(0);
         $settings->DeleteSyncData(0);
         $settings->DeleteCompleted(0);
+        $settings->InstallSD(0);
         $settings->ConfirmActions(1);
 
         WriteSettings();
@@ -789,6 +903,13 @@ sub ParseSettings
             $settings->RestoreData($value);
             next;
         }
+        if (/RemoveData=/) {
+            $value = $_;
+            chomp($value);
+            ($key, $value) = split(/=/, $value);
+            $settings->RemoveData($value);
+            next;
+        }
         if (/SyncMissing=/) {
             $value = $_;
             chomp($value);
@@ -810,6 +931,13 @@ sub ParseSettings
             $settings->ConfirmActions($value);
             next;
         }
+        if (/InstallSD=/) {
+            $value = $_;
+            chomp($value);
+            ($key, $value) = split(/=/, $value);
+            $settings->InstallSD($value);
+            next;
+        }
         if (/DeleteCompleted=/) {
             $value = $_;
             chomp($value);
@@ -826,11 +954,10 @@ sub ParseSettings
 # This function returns a hash of Package structure
 sub ParseADBReport
 {
-    my $FileName = $_[0];
-
+    my $SERIAL = $_[0];
     my $STRING_KV;
 
-    open(hReportFile, $FileName) or die "Could not open $FileName!\n";
+    open(hReportFile, "$SYNC_DIRECTORY/$SERIAL.txt") or die "Could not open $SERIAL.txt!\n";
 
     my %phash = ();
     my $package = Package->new();
@@ -839,8 +966,10 @@ sub ParseADBReport
     {
         if (/  Package \[[\d\S]+\] \(*[a-f0-9]{8,}\):/i) {
             $STRING_KV = $_;
+            # Remove CR-LF to make substr work same on all systems
+            $STRING_KV =~ s/\R//g;
             chomp($STRING_KV);
-            $STRING_KV = substr($STRING_KV, 11, -15);
+            $STRING_KV = substr($STRING_KV, 11, -13);
             $package->name($STRING_KV);
             next;
         }

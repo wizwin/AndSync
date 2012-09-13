@@ -1,0 +1,22 @@
+AndSync - CHANGELOG
+===================
+
+[Legend]
++ Feature Added
+- Feature Removed
+* Bug Fix
+
+[v1.0] 28.08.2012
+
++ Initial release
++ Basic Sync, Backup and Restore
++ Data backup and restore on rooted devices
++ Settings menu
+
+[v1.1] 13.09.2012
+
+* Fix package name truncation on some systems.
+* Fixed menu input handling.
++ Added option to un-install application and data.
++ Added option to install/restore application on SD card.
++ Added option to restore from apps from another device.
