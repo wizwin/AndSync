@@ -32,7 +32,7 @@
 #   Date           Version    Author   Comments
 ###############################################################################
 #   28.08.2012     1.0        WiZarD   Initial version
-#   13.08.2012     1.1        WiZarD   New features and bug fixes
+#   13.09.2012     1.1        WiZarD   New features and bug fixes
 ###############################################################################
 
 use strict;
