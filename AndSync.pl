@@ -104,7 +104,7 @@ my $choice = " ";
 # Print out a banner for information
 sub PrintBanner
 {
-    print "\nAndSync v1.1 - Sync your Andorid devices";
+    print "\nAndSync v1.1a - Sync your Andorid devices";
     print "\nCopyright (C) 2012, Winny Mathew Kurian (WiZarD)\n";
 }
 
@@ -666,7 +666,7 @@ sub PushPackages
     my $installSD = $settings->InstallSD ? "-s" : "";
 
     while(my ($packageName, $packageUpdate) = each(%phashUpdate)) {
-        if (ConfirmPrompt("Update $packageName")) {
+        if (ConfirmPrompt("\nUpdate $packageName")) {
 
             if (not $settings->RestoreSystemApps) {
                 next if isSystemApp($packageName);
@@ -815,13 +815,15 @@ sub ResolvePackageSync
 
     while(my ($key, $packageMaster) = each(%phashMaster)) {
         $packageSlave = $phashSlave {$packageMaster->name};
+
+        # Ignore system apps when syncing
+        next if isSystemApp($packageMaster->name);
+
         if ($packageSlave)
         {
-            next if isSystemApp($packageMaster->name);
-
             if ($packageMaster->version_code > $packageSlave->version_code)
             {
-                print "+++ '$key' needs to be updated +++\n";
+                print "[^] Package '$key' needs to be updated\n";
 
                 # Add packages to be updated to hash
                 $phash{ $packageMaster->name } = $packageMaster;
@@ -838,7 +840,7 @@ sub ResolvePackageSync
         else
         {
             if ($settings->SyncMissing) {
-                print "+++ '$key' needs to be installed +++\n";
+                print "[+] Package '$key' needs to be installed\n";
 
                 # Add missing packages to be installed
                 $phash{ $packageMaster->name } = $packageMaster;

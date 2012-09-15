@@ -4,6 +4,7 @@ AndSync - CHANGELOG
 [Legend]
 + Feature Added
 - Feature Removed
+^ Enhancement
 * Bug Fix
 
 [v1.0] 28.08.2012
@@ -20,3 +21,8 @@ AndSync - CHANGELOG
 + Added option to un-install application and data.
 + Added option to install/restore application on SD card.
 + Added option to restore from apps from another device.
+
+[v1.1a] 16.09.2012
+
+* Minor fix in sync packages (system app check).
+^ Updated legend  while displaying packages to sync.
