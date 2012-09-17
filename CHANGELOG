@@ -25,4 +25,9 @@ AndSync - CHANGELOG
 [v1.1a] 16.09.2012
 
 * Minor fix in sync packages (system app check).
-^ Updated legend  while displaying packages to sync.
+^ Updated legend while displaying packages to sync.
+
+[v1.2] 18.09.2012
+
++ Added new backup and restore method for devices running Android ICS (4.0) or above.
+  ^ This will work on non-rooted devices as well.

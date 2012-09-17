@@ -33,6 +33,7 @@
 ###############################################################################
 #   28.08.2012     1.0        WiZarD   Initial version
 #   13.09.2012     1.1        WiZarD   New features and bug fixes
+#   18.09.2012     1.2        WiZarD   Added new backup and restore method
 ###############################################################################
 
 use strict;
@@ -41,6 +42,7 @@ use Class::Struct;
 use File::Path;
 use File::Basename;
 use Archive::Zip;
+use Version;
 
 # 'Package' structure which holds APK details parsed from ADB report
 struct Package => {
@@ -69,6 +71,7 @@ struct Settings => {
     DeleteSyncData => '$',
     DeleteCompleted => '$',
     InstallSD => '$',
+    UseNewADBCmd => '$',
     ConfirmActions => '$',
 };
 
@@ -93,6 +96,9 @@ my $SETTINGS_FILE = "./Settings.ini";
 my $SYNC_DIRECTORY = "./SyncData";
 my $BACKUP_DIRECTORY = "./Backup";
 
+# ICS version
+my $VERSION_ICS = version->declare("4.0.0");
+
 my $SYNC_DEVICE_MASTER = "";
 my $SYNC_DEVICE_SLAVE = "";
 
@@ -104,7 +110,7 @@ my $choice = " ";
 # Print out a banner for information
 sub PrintBanner
 {
-    print "\nAndSync v1.1a - Sync your Andorid devices";
+    print "\nAndSync v1.2 - Sync your Andorid devices";
     print "\nCopyright (C) 2012, Winny Mathew Kurian (WiZarD)\n";
 }
 
@@ -247,6 +253,7 @@ sub WriteSettings
     print hSettingsFile "DeleteSyncData=" . $settings->DeleteSyncData . "\n";
     print hSettingsFile "DeleteCompleted=" . $settings->DeleteCompleted . "\n";
     print hSettingsFile "InstallSD=" . $settings->InstallSD . "\n";
+    print hSettingsFile "UseNewADBCmd=" . $settings->UseNewADBCmd . "\n";
     print hSettingsFile "ConfirmActions=" . $settings->ConfirmActions . "\n";
 
     close (hSettingsFile);
@@ -258,23 +265,24 @@ sub SettingsMain
     while(1) {
         printf "\n================== SETTINGS ===================\n\n";
         printf " 0. Back\n";
-        printf " 1. Backup system applications       [%4s ]\n", $settings->BackupSystemApps ? "Yes" : "No";
-        printf " 2. Backup data on rooted devices    [%4s ]\n", $settings->BackupData ? "Yes" : "No";
-        printf " 3. Restore system applications      [%4s ]\n", $settings->RestoreSystemApps ? "Yes" : "No";
-        printf " 4. Restore data on rooted devices   [%4s ]\n", $settings->RestoreData ? "Yes" : "No";
-        printf " 5. Remove data while un-installing  [%4s ]\n", $settings->RemoveData ? "Yes" : "No";
-        printf " 6. Sync missing applications        [%4s ]\n", $settings->SyncMissing ? "Yes" : "No";
-        printf " 7. Delete sync data on exit         [%4s ]\n", $settings->DeleteSyncData ? "Yes" : "No";
-        printf " 8. Delete package once installed    [%4s ]\n", $settings->DeleteCompleted ? "Yes" : "No";
-        printf " 9. Install apps on SD Card          [%4s ]\n", $settings->InstallSD ? "Yes" : "No";
-        printf "10. Confirm all actions              [%4s ]\n", $settings->ConfirmActions ? "Yes" : "No";
-        printf "11. About AndSync\n";
-        printf "\n[0-11]> ";
+        printf " 1. Backup system applications          [%4s ]\n", $settings->BackupSystemApps ? "Yes" : "No";
+        printf " 2. Backup data on rooted devices       [%4s ]\n", $settings->BackupData ? "Yes" : "No";
+        printf " 3. Restore system applications         [%4s ]\n", $settings->RestoreSystemApps ? "Yes" : "No";
+        printf " 4. Restore data on rooted devices      [%4s ]\n", $settings->RestoreData ? "Yes" : "No";
+        printf " 5. Remove data while un-installing     [%4s ]\n", $settings->RemoveData ? "Yes" : "No";
+        printf " 6. Sync missing applications           [%4s ]\n", $settings->SyncMissing ? "Yes" : "No";
+        printf " 7. Delete sync data on exit            [%4s ]\n", $settings->DeleteSyncData ? "Yes" : "No";
+        printf " 8. Delete package once installed       [%4s ]\n", $settings->DeleteCompleted ? "Yes" : "No";
+        printf " 9. Install apps on SD Card             [%4s ]\n", $settings->InstallSD ? "Yes" : "No";
+        printf "10. Use new backup-restore (above GB)   [%4s ]\n", $settings->UseNewADBCmd ? "Yes" : "No";
+        printf "11. Confirm all actions                 [%4s ]\n", $settings->ConfirmActions ? "Yes" : "No";
+        printf "12. About AndSync\n";
+        printf "\n[0-12]> ";
 
         chomp($choice = <STDIN>);
         redo if not isNumber($choice);
-        if ($choice < 0 || $choice > 11) {
-            print "\nPlease enter a menu option (0-11)\n";
+        if ($choice < 0 || $choice > 12) {
+            print "\nPlease enter a menu option (0-12)\n";
             redo;
         }
 
@@ -311,9 +319,12 @@ sub SettingsMain
             $settings->InstallSD($settings->InstallSD ? 0 : 1);
         }
         elsif ($choice == 10) {
-            $settings->ConfirmActions($settings->ConfirmActions ? 0 : 1);
+            $settings->UseNewADBCmd($settings->UseNewADBCmd ? 0 : 1);
         }
         elsif ($choice == 11) {
+            $settings->ConfirmActions($settings->ConfirmActions ? 0 : 1);
+        }
+        elsif ($choice == 12) {
             # Open self and print out GNU Copyright notice
             open SELF, __FILE__ or redo;
             while (<SELF>) {
@@ -371,6 +382,8 @@ sub RefreshDeviceList
         } else {
             $IS_ROOTED = 0;
         }
+
+        $PROP_ANDROID_VERSION = version->parse($PROP_ANDROID_VERSION);
 
         push @ADB_DEVICES, Device->new(
             serial => $SERIAL,
@@ -433,21 +446,36 @@ sub BackupDevice
     $SERIAL = shift;
     my $nPackages = 0;
     my $nPackagesDone = 0;
+    my $VersionDev;
+    my $BackupSystemApps;
 
     return if ($ADB_DEVICES_COUNT < 1);
 
-    RetriveDeviceReport($SERIAL);
+    $BackupSystemApps = $settings->BackupSystemApps ? "-system" : "-nosystem";
 
-    my %phashMaster = ParseADBReport($SERIAL);
-    $nPackages = scalar(keys(%phashMaster));
-
-    print "\nFound $nPackages applications in $SERIAL\n";
-    if (ConfirmPrompt("\nProceed with backup")) {
-        $nPackagesDone = PullPackages(\%phashMaster, $SERIAL, $BACKUP_DIRECTORY);
+    # On newer devices use 'adb backup' if user has configured so else
+    # proceed with normal backup method.
+    $VersionDev = GetDeviceProperty($SERIAL, "android");
+    if ($settings->UseNewADBCmd && ($VersionDev > $VERSION_ICS)) {
+        if (ConfirmPrompt("\nProceed with backup")) {
+            print "\nPlease confirm backup operation on your device [$SERIAL]...\n";
+            system("adb -s $SERIAL backup -f $BACKUP_DIRECTORY/$SERIAL/$SERIAL.ab -apk $BackupSystemApps -all");
+        }
     }
+    else {
+        RetriveDeviceReport($SERIAL);
 
-    print "\nTotal $nPackages packages. $nPackagesDone packages were backed up. " . 
-          ($nPackages - $nPackagesDone) . " packages were ignored.\n";
+        my %phashMaster = ParseADBReport($SERIAL);
+        $nPackages = scalar(keys(%phashMaster));
+
+        print "\nFound $nPackages applications in $SERIAL\n";
+        if (ConfirmPrompt("\nProceed with backup")) {
+            $nPackagesDone = PullPackages(\%phashMaster, $SERIAL, $BACKUP_DIRECTORY);
+        }
+
+        print "\nTotal $nPackages packages. $nPackagesDone packages were backed up. " . 
+              ($nPackages - $nPackagesDone) . " packages were ignored.\n";
+    }
 }
 
 sub RestoreDevice
@@ -458,9 +486,27 @@ sub RestoreDevice
     my $nPackages = 0;
     my $nPackagesDone = 0;
     my $packageBaseName;
+    my $VersionDev;
     my @apk_files;
 
     return if ($ADB_DEVICES_COUNT < 1);
+
+    # On newer devices use 'adb restore' if user has configured so else
+    # proceed with normal restore method.
+    $VersionDev = GetDeviceProperty($SERIAL, "android");
+    if ($settings->UseNewADBCmd && ($VersionDev > $VERSION_ICS)) {
+        if (not -e "$BACKUP_DIRECTORY/$DIR/$DIR.ab") {
+            print "No data found to restore for $SERIAL...\n";
+            return;
+        }
+
+        if (ConfirmPrompt("\nProceed with restore")) {
+            print "\nPlease confirm restore operation on your device [$SERIAL]...\n";
+            system("adb -s $SERIAL restore $BACKUP_DIRECTORY/$DIR/$DIR.ab");
+        }
+
+        return;
+    }
 
     while (1) {
         while (1) {
@@ -868,6 +914,7 @@ sub ParseSettings
         $settings->DeleteSyncData(0);
         $settings->DeleteCompleted(0);
         $settings->InstallSD(0);
+        $settings->UseNewADBCmd(1);
         $settings->ConfirmActions(1);
 
         WriteSettings();
@@ -938,6 +985,13 @@ sub ParseSettings
             chomp($value);
             ($key, $value) = split(/=/, $value);
             $settings->InstallSD($value);
+            next;
+        }
+        if (/UseNewADBCmd=/) {
+            $value = $_;
+            chomp($value);
+            ($key, $value) = split(/=/, $value);
+            $settings->UseNewADBCmd($value);
             next;
         }
         if (/DeleteCompleted=/) {
