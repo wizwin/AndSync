@@ -31,3 +31,9 @@ AndSync - CHANGELOG
 
 + Added new backup and restore method for devices running Android ICS (4.0) or above.
   ^ This will work on non-rooted devices as well.
+
+[v1.3] 23.09.2012
+
++ Added self updater (No version checks :p)
++ Added prompt to prevent previous backups from being overwritten.
++ Enhanced error handling.

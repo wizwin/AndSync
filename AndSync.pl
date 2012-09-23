@@ -25,7 +25,8 @@
 # Prerequisites
 #  OS           - Any OS
 #  Android SDK  - ADB shell
-#  Perl         - Class::Struct File::Path File::Basename Archive::Zip
+#  Perl         - Class::Struct File::Path File::Basename File::Fetch 
+#                 File::Copy Archive::Zip, (File::Fetch->Version)
 #
 # Revisions
 ###############################################################################
@@ -34,6 +35,7 @@
 #   28.08.2012     1.0        WiZarD   Initial version
 #   13.09.2012     1.1        WiZarD   New features and bug fixes
 #   18.09.2012     1.2        WiZarD   Added new backup and restore method
+#   23.09.2012     1.3        WiZarD   Self updater, Prompt if backup exists
 ###############################################################################
 
 use strict;
@@ -41,8 +43,10 @@ use strict;
 use Class::Struct;
 use File::Path;
 use File::Basename;
+use File::Fetch;
+use File::Copy;
 use Archive::Zip;
-use Version;
+# use Version;
 
 # 'Package' structure which holds APK details parsed from ADB report
 struct Package => {
@@ -91,9 +95,22 @@ my $ADB_DEVICES_COUNT;
 my $DEVICE;
 my $SERIAL;
 
+# Path to RAW file 'AndSync.pl' on GitHub
+my $UPDATER_GIT_FILE = "http://raw.github.com/wizwin/AndSync/master/AndSync.pl";
+
+# Temporary path used by self updater
+my $UPDATER_TMP_DIR = "./Updater.tmp";
+
+# Log file name (not used now)
 my $LOG_FILE = "./AndSync.log";
+
+# Settings file
 my $SETTINGS_FILE = "./Settings.ini";
+
+# Sync data directory
 my $SYNC_DIRECTORY = "./SyncData";
+
+# Backup directory
 my $BACKUP_DIRECTORY = "./Backup";
 
 # ICS version
@@ -110,7 +127,7 @@ my $choice = " ";
 # Print out a banner for information
 sub PrintBanner
 {
-    print "\nAndSync v1.2 - Sync your Andorid devices";
+    print "\nAndSync v1.3 - Sync your Andorid devices";
     print "\nCopyright (C) 2012, Winny Mathew Kurian (WiZarD)\n";
 }
 
@@ -188,7 +205,9 @@ while(1) {
         if ($SYNC_DEVICE_MASTER >= 0) {
             $SYNC_DEVICE_SLAVE  = SelectDevice("\nSelect a device to sync to");
             if ($SYNC_DEVICE_SLAVE >= 0) {
-                SyncDevices($ADB_DEVICES[$SYNC_DEVICE_MASTER]->serial, $ADB_DEVICES[$SYNC_DEVICE_SLAVE]->serial);
+                SyncDevices(
+                    $ADB_DEVICES[$SYNC_DEVICE_MASTER]->serial, 
+                    $ADB_DEVICES[$SYNC_DEVICE_SLAVE]->serial);
             }
         }
     }
@@ -265,24 +284,36 @@ sub SettingsMain
     while(1) {
         printf "\n================== SETTINGS ===================\n\n";
         printf " 0. Back\n";
-        printf " 1. Backup system applications          [%4s ]\n", $settings->BackupSystemApps ? "Yes" : "No";
-        printf " 2. Backup data on rooted devices       [%4s ]\n", $settings->BackupData ? "Yes" : "No";
-        printf " 3. Restore system applications         [%4s ]\n", $settings->RestoreSystemApps ? "Yes" : "No";
-        printf " 4. Restore data on rooted devices      [%4s ]\n", $settings->RestoreData ? "Yes" : "No";
-        printf " 5. Remove data while un-installing     [%4s ]\n", $settings->RemoveData ? "Yes" : "No";
-        printf " 6. Sync missing applications           [%4s ]\n", $settings->SyncMissing ? "Yes" : "No";
-        printf " 7. Delete sync data on exit            [%4s ]\n", $settings->DeleteSyncData ? "Yes" : "No";
-        printf " 8. Delete package once installed       [%4s ]\n", $settings->DeleteCompleted ? "Yes" : "No";
-        printf " 9. Install apps on SD Card             [%4s ]\n", $settings->InstallSD ? "Yes" : "No";
-        printf "10. Use new backup-restore (above GB)   [%4s ]\n", $settings->UseNewADBCmd ? "Yes" : "No";
-        printf "11. Confirm all actions                 [%4s ]\n", $settings->ConfirmActions ? "Yes" : "No";
-        printf "12. About AndSync\n";
-        printf "\n[0-12]> ";
+        printf " 1. Backup system applications          [%4s ]\n", 
+            $settings->BackupSystemApps ? "Yes" : "No";
+        printf " 2. Backup data on rooted devices       [%4s ]\n",
+            $settings->BackupData ? "Yes" : "No";
+        printf " 3. Restore system applications         [%4s ]\n",
+            $settings->RestoreSystemApps ? "Yes" : "No";
+        printf " 4. Restore data on rooted devices      [%4s ]\n",
+            $settings->RestoreData ? "Yes" : "No";
+        printf " 5. Remove data while un-installing     [%4s ]\n",
+            $settings->RemoveData ? "Yes" : "No";
+        printf " 6. Sync missing applications           [%4s ]\n",
+            $settings->SyncMissing ? "Yes" : "No";
+        printf " 7. Delete sync data on exit            [%4s ]\n",
+            $settings->DeleteSyncData ? "Yes" : "No";
+        printf " 8. Delete package once installed       [%4s ]\n",
+            $settings->DeleteCompleted ? "Yes" : "No";
+        printf " 9. Install apps on SD Card             [%4s ]\n",
+            $settings->InstallSD ? "Yes" : "No";
+        printf "10. Use new backup-restore (above GB)   [%4s ]\n",
+            $settings->UseNewADBCmd ? "Yes" : "No";
+        printf "11. Confirm all actions                 [%4s ]\n",
+            $settings->ConfirmActions ? "Yes" : "No";
+        printf "12. Update this script\n";
+        printf "13. About AndSync\n";
+        printf "\n[0-13]> ";
 
         chomp($choice = <STDIN>);
         redo if not isNumber($choice);
-        if ($choice < 0 || $choice > 12) {
-            print "\nPlease enter a menu option (0-12)\n";
+        if ($choice < 0 || $choice > 13) {
+            print "\nPlease enter a menu option (0-13)\n";
             redo;
         }
 
@@ -325,6 +356,9 @@ sub SettingsMain
             $settings->ConfirmActions($settings->ConfirmActions ? 0 : 1);
         }
         elsif ($choice == 12) {
+            PerformSelfUpdate();
+        }
+        elsif ($choice == 13) {
             # Open self and print out GNU Copyright notice
             open SELF, __FILE__ or redo;
             while (<SELF>) {
@@ -336,6 +370,36 @@ sub SettingsMain
 
             print "\nIf you see a smiley [:)] your device is rooted!\n";
         }
+    }
+}
+
+sub PerformSelfUpdate
+{
+    $File::Fetch::WARN = 0;
+    my $Updater;
+    my $Path;
+
+    if (ConfirmPrompt("\nProceed with script update")) {
+
+        print "\nDownloading script from server...\n";
+        $Updater = File::Fetch->new(uri => $UPDATER_GIT_FILE);
+        if ($Updater) {
+            $Path = $Updater->fetch(to => $UPDATER_TMP_DIR);
+
+            if ($Path) {
+                copy("$UPDATER_TMP_DIR/AndSync.pl", "AndSync.pl");
+                rmtree($UPDATER_TMP_DIR);
+                if (ConfirmPrompt("\nUpdated. Restart script")) {
+                    exec($^X, $0, @ARGV);
+                } else {
+                    return;
+                }
+            }
+        }
+
+        # We will get here only only if the update fails
+        rmtree($UPDATER_TMP_DIR);
+        print "\nUpdate failed! Please make sure you are connected to internet.\n"
     }
 }
 
@@ -448,18 +512,30 @@ sub BackupDevice
     my $nPackagesDone = 0;
     my $VersionDev;
     my $BackupSystemApps;
+    my @apk_files;
 
     return if ($ADB_DEVICES_COUNT < 1);
-
-    $BackupSystemApps = $settings->BackupSystemApps ? "-system" : "-nosystem";
 
     # On newer devices use 'adb backup' if user has configured so else
     # proceed with normal backup method.
     $VersionDev = GetDeviceProperty($SERIAL, "android");
     if ($settings->UseNewADBCmd && ($VersionDev > $VERSION_ICS)) {
         if (ConfirmPrompt("\nProceed with backup")) {
+            $BackupSystemApps = $settings->BackupSystemApps ? "-system" : "-nosystem";
+
+            if (-e "$BACKUP_DIRECTORY/$SERIAL/$SERIAL.ab") {
+                if (not ConfirmPrompt("\nOverwrite existing backup")) {
+                    return;
+                }
+            }
+
             print "\nPlease confirm backup operation on your device [$SERIAL]...\n";
             system("adb -s $SERIAL backup -f $BACKUP_DIRECTORY/$SERIAL/$SERIAL.ab -apk $BackupSystemApps -all");
+            if ($? < 0) {
+                print "\nBackup failed!\n";
+            } elsif ($? == 0) {
+                print "\nBackup complete!\n";
+            }
         }
     }
     else {
@@ -470,6 +546,14 @@ sub BackupDevice
 
         print "\nFound $nPackages applications in $SERIAL\n";
         if (ConfirmPrompt("\nProceed with backup")) {
+            @apk_files = glob "$BACKUP_DIRECTORY/$SERIAL/*.apk";
+
+            if (-e "$BACKUP_DIRECTORY/$SERIAL" && (scalar(@apk_files) > 1)) {
+                if (not ConfirmPrompt("\nOverwrite existing backups")) {
+                    return;
+                }
+            }
+
             $nPackagesDone = PullPackages(\%phashMaster, $SERIAL, $BACKUP_DIRECTORY);
         }
 
@@ -503,6 +587,12 @@ sub RestoreDevice
         if (ConfirmPrompt("\nProceed with restore")) {
             print "\nPlease confirm restore operation on your device [$SERIAL]...\n";
             system("adb -s $SERIAL restore $BACKUP_DIRECTORY/$DIR/$DIR.ab");
+        }
+
+        if ($? < 0) {
+            print "\nRestore failed!\n";
+        } elsif ($? == 0) {
+            print "\nRestore complete!\n";
         }
 
         return;
@@ -552,8 +642,14 @@ sub RestoreDevice
 
             print "\nRestoring $packageBaseName\n";
             system("adb -s $SERIAL install $installSD $packageName");
+            if ($? < 0) {
+                print "\n[Error] While installing package: $packageName. Continuing...\n";
+                next;
+            }
 
-            if ($rooted && $settings->RestoreData) {
+            next if (($? >> 8) & 127);
+
+            if (($? == 0) && $rooted && $settings->RestoreData) {
                 print "\nRestoring data for $packageBaseName\n";
 
                 # Remove the extension from the name
@@ -564,8 +660,12 @@ sub RestoreDevice
                 my $zip = Archive::Zip->new("$packageName.zip");
                 $zip->extractTree("", "$BACKUP_DIRECTORY/$DIR/");
 
-                # FIXME: We have not preserved any metadata for restore, hence data path is hardcoded for now
+                # FIXME: We have not preserved any metadata for restore, 
+                # hence data path is hardcoded for now
                 system("adb -s $SERIAL push $packageName /data/data/$packageBaseName");
+                if ($? < 0) {
+                    print "\n[Error] While installing data for: $packageName. Continuing...\n";
+                }
 
                 # Remove data directory
                 rmtree("$packageName");
@@ -690,7 +790,8 @@ sub SyncDevices
     if (ConfirmPrompt("\nDo you wish to proceed with sync?")) {
         $nPackagesPulled = PullPackages(\%phashUpdate, $SERIAL_DEVICE_MASTER, $SYNC_DIRECTORY);
         print "\n";
-        $nPackagesPushed = PushPackages(\%phashUpdate, $SERIAL_DEVICE_MASTER, $SERIAL_DEVICE_SLAVE, $SYNC_DIRECTORY);
+        $nPackagesPushed = PushPackages(\%phashUpdate, $SERIAL_DEVICE_MASTER, 
+                                                       $SERIAL_DEVICE_SLAVE, $SYNC_DIRECTORY);
     }
 
     print "\nSynced " . $nPackagesPushed . " packages\n";
@@ -720,9 +821,15 @@ sub PushPackages
 
             print "\nUpdating $packageName\n";
             system("adb -s $SERIAL_DEVICE_SLAVE install -r $installSD $DIRECTORY/$SERIAL_DEVICE_MASTER/$packageName.apk");
+            if ($? < 0) {
+                print "\n[Error] While installing package: $packageName. Continuing...\n";
+                next;
+            }
+
+            next if (($? >> 8) & 127);
 
             # Now restore data if the device is rooted
-            if ($rooted && $settings->RestoreData) {
+            if (($? == 0) && $rooted && $settings->RestoreData) {
                 print "\nUpdating data for $packageName\n";
 
                 # Extract the package data
@@ -732,6 +839,9 @@ sub PushPackages
 
                 $dataPath = $packageUpdate->data_path;
                 system("adb -s $SERIAL_DEVICE_SLAVE push $DIRECTORY/$SERIAL_DEVICE_MASTER/$packageName $dataPath");
+                if ($? < 0) {
+                    print "\n[Error] While installing data for: $packageName. Continuing...\n";
+                }
 
                 # Remove data directory
                 rmtree("$DIRECTORY/$SERIAL_DEVICE_MASTER/$packageName");
@@ -775,20 +885,29 @@ sub PullPackages
 
         print "\nRetriving package $apkPath\n";
         system("adb -s $SERIAL_DEVICE_MASTER pull $apkPath $DIRECTORY/$SERIAL_DEVICE_MASTER/$packageName.apk");
+        if ($? < 0) {
+            print "\n[Error] While retriving package: $packageName. Continuing...\n";
+            next;
+        }
 
-        if ($rooted && $settings->BackupData) {
+        next if (($? >> 8) & 127);
+
+        if (($? == 0) && $rooted && $settings->BackupData) {
             $dataPath = $packageUpdate->data_path;
             print "\nRetriving data and settings for $packageName\n";
             system("adb -s $SERIAL_DEVICE_MASTER pull $dataPath $DIRECTORY/$SERIAL_DEVICE_MASTER/$packageName");
+            if ($? < 0) {
+                print "\n[Error] While retriving data for: $packageName. Continuing...\n";
+            } elsif ($? == 0) {
+                # Create and archive (zip)
+                print "\nCreating zip archive...\n";
+                my $zip = Archive::Zip->new();
+                $zip->addTree("$DIRECTORY/$SERIAL_DEVICE_MASTER/$packageName", "$packageName");
+                $zip->writeToFileNamed("$DIRECTORY/$SERIAL_DEVICE_MASTER/$packageName.zip");
 
-            # Create and archive (zip)
-            print "\nCreating zip archive...\n";
-            my $zip = Archive::Zip->new();
-            $zip->addTree("$DIRECTORY/$SERIAL_DEVICE_MASTER/$packageName", "$packageName");
-            $zip->writeToFileNamed("$DIRECTORY/$SERIAL_DEVICE_MASTER/$packageName.zip");
-
-            # Remove data directory
-            rmtree("$DIRECTORY/$SERIAL_DEVICE_MASTER/$packageName");
+                # Remove data directory
+                rmtree("$DIRECTORY/$SERIAL_DEVICE_MASTER/$packageName");
+            }
         }
 
         $nPackages++;
@@ -815,6 +934,12 @@ sub UninstallPackages
 
             print "\nUn-installing $packageName\n";
             system("adb -s $SERIAL uninstall $KeepData $packageName");
+            if ($? < 0) {
+                print "\n[Error] While uninstalling package: $packageName. Continuing...\n";
+                next;
+            }
+
+            next if (($? >> 8) & 127);
 
             $nPackagesDone++;
         }
