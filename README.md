@@ -14,10 +14,11 @@ Usage
 
 - On Windows:
     > perl AndSync.pl
-
+     [ OR ]
+    > Click on 'Run.bat'
 
 - On Linux/Unix based systems:
-    > AndSync.pl
+    > ./AndSync.pl
 
 
 I assume you have set the paths correctly, gave executable permissions etc.
