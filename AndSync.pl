@@ -613,6 +613,9 @@ sub RestoreDevice
                     return;
                 }
             }
+            else {
+                last;
+            }
         }
 
         # This will get us file names with path
