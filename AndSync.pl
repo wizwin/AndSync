@@ -479,7 +479,7 @@ sub DisplayDevices
     }
 }
 
-# Checks if the given app in a system app (Not very amazing, but no other go now)
+# Checks if the given app is a system app (Not very amazing, but no other way now)
 #
 # The array here needs to be updated as required or this sub-routine has to be
 # replaced with a better one.
