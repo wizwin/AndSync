@@ -4,7 +4,7 @@
 #
 # AndSync - Synchronize, Backup and Restore your Android device
 #
-# AndSync Copyright (C) 2012, Winny Mathew Kurian (WiZarD)
+# AndSync Copyright (C) 2012-2014 Winny Mathew Kurian (WiZarD)
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -36,6 +36,7 @@
 #   13.09.2012     1.1        WiZarD   New features and bug fixes
 #   18.09.2012     1.2        WiZarD   Added new backup and restore method
 #   23.09.2012     1.3        WiZarD   Self updater, Prompt if backup exists
+#   12.04.2014     1.4        WiZarD   Fixed bugs, Enhancements
 ###############################################################################
 
 use strict;
@@ -83,9 +84,9 @@ struct Settings => {
 # Update this array as required
 my @SYSTEM_NAMESPACE = 
 (
-    "com.android", "com.google", "com.cyanogenmod", "com.sonyericsson",
-    "com.motorola", "com.htc", "com.samsung", "com.lge", 
-    "com.huawei", "com.zte", "com.sony"
+    "com.android", "com.sec", "com.google", "com.cyanogenmod", 
+    "com.sonyericsson", "com.motorola", "com.htc", "com.samsung",  
+    "com.lge", "com.huawei", "com.zte", "com.sony"
 );
 
 my $settings = Settings->new();
@@ -127,8 +128,8 @@ my $choice = " ";
 # Print out a banner for information
 sub PrintBanner
 {
-    print "\nAndSync v1.3 - Sync your Andorid devices";
-    print "\nCopyright (C) 2012, Winny Mathew Kurian (WiZarD)\n";
+    print "\nAndSync v1.4 - Sync your Andorid devices";
+    print "\nCopyright (C) 2012-2014, Winny Mathew Kurian (WiZarD)\n";
 }
 
 # Print one time banner
@@ -429,6 +430,8 @@ sub RefreshDeviceList
     foreach $SERIAL (@DEVICES) {
         $SERIAL =~ s/\R//g;
 
+        # FIXME: We need to check device autherization here so that script won't abort
+        # for a device that is connected for the first time
         $PROP_MANUFACTURER      = `adb -s $SERIAL shell getprop ro.product.manufacturer`;
         $PROP_PROD_MODEL        = `adb -s $SERIAL shell getprop ro.product.model`;
         $PROP_ANDROID_VERSION   = `adb -s $SERIAL shell getprop ro.build.version.release`;
@@ -471,7 +474,7 @@ sub DisplayDevices
 
     while ($nDevice < $ADB_DEVICES_COUNT) {
         $nDevice++;
-        printf "%2d: %-14s [ %5s ] - %-16s%s\n", $nDevice, 
+        printf "%2d: %-14s [ %10s ] - %-16s%s\n", $nDevice, 
             $ADB_DEVICES[$nDevice-1]->manufacturer,
             $ADB_DEVICES[$nDevice-1]->product_model,
             $ADB_DEVICES[$nDevice-1]->serial,
@@ -840,7 +843,6 @@ sub PushPackages
                 my $zip = Archive::Zip->new("$DIRECTORY/$SERIAL_DEVICE_MASTER/$packageName.zip");
                 $zip->extractTree("", "$DIRECTORY/$SERIAL_DEVICE_MASTER/$packageName");
 
-                $dataPath = $packageUpdate->data_path;
                 system("adb -s $SERIAL_DEVICE_SLAVE push $DIRECTORY/$SERIAL_DEVICE_MASTER/$packageName $dataPath");
                 if ($? < 0) {
                     print "\n[Error] While installing data for: $packageName. Continuing...\n";
@@ -897,6 +899,11 @@ sub PullPackages
 
         if (($? == 0) && $rooted && $settings->BackupData) {
             $dataPath = $packageUpdate->data_path;
+            if ($dataPath eq "null") {
+                print "\nNo data to backup for $packageName\n";
+                next;
+            }
+
             print "\nRetriving data and settings for $packageName\n";
             system("adb -s $SERIAL_DEVICE_MASTER pull $dataPath $DIRECTORY/$SERIAL_DEVICE_MASTER/$packageName");
             if ($? < 0) {
@@ -1168,6 +1175,9 @@ sub ParseADBReport
             $STRING_KV = $_;
             chomp($STRING_KV);
             $STRING_KV = substr($STRING_KV, 16);
+            # Some ADB report also includes targetSdk=X on the same line
+            # if so strip it off (get only first element)
+            $STRING_KV = (split / /, $STRING_KV)[0];
             $package->version_code($STRING_KV);
             next;
         }
@@ -1181,7 +1191,7 @@ sub ParseADBReport
         if (/    dataDir=/) {
             $STRING_KV = $_;
             chomp($STRING_KV);
-            $STRING_KV = substr($STRING_KV, 13);
+            $STRING_KV = substr($STRING_KV, 12);
             $package->data_path($STRING_KV);
             next;
         }

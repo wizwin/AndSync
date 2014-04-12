@@ -37,3 +37,7 @@ AndSync - CHANGELOG
 + Added self updater (No version checks :p)
 + Added prompt to prevent previous backups from being overwritten.
 + Enhanced error handling.
+
+[v1.4] 12.04.2014
+
+* Fixed parsing errors for ADB reports generated on newer phones.
