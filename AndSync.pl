@@ -4,7 +4,7 @@
 #
 # AndSync - Synchronize, Backup and Restore your Android device
 #
-# AndSync Copyright (C) 2012-2014 Winny Mathew Kurian (WiZarD)
+# AndSync Copyright (C) 2012-2020 Winny Mathew Kurian (WiZarD)
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -25,9 +25,10 @@
 # Prerequisites
 #  OS           - Any OS
 #  Android SDK  - ADB shell
+#                 $ sudu apt install adb (on 20.04)
 #  Perl         - Class::Struct File::Path File::Basename File::Fetch 
 #                 File::Copy Archive::Zip, (File::Fetch->Version)
-#
+#                 $ sudo perl -MCPAN -e shell
 # Revisions
 ###############################################################################
 #   Date           Version    Author   Comments
@@ -36,7 +37,8 @@
 #   13.09.2012     1.1        WiZarD   New features and bug fixes
 #   18.09.2012     1.2        WiZarD   Added new backup and restore method
 #   23.09.2012     1.3        WiZarD   Self updater, Prompt if backup exists
-#   12.04.2014     1.4        WiZarD   Fixed bugs, Enhancements
+#   12.04.2014     1.4        WiZarD   Fixed bugs, Enhancements (Not released)
+#   18.10.2020     1.5        WiZarD   Support Android Pie and above
 ###############################################################################
 
 use strict;
@@ -49,15 +51,17 @@ use File::Copy;
 use Archive::Zip;
 # use Version;
 
-# 'Package' structure which holds APK details parsed from ADB report
+# 'Package' structure holds APK details parsed from ADB report
 struct Package => {
     name => '$',
     path => '$',
     version_code => '$',
     version_name => '$',
     data_path => '$',
+    system => '$',
 };
 
+# 'Device' structure holds device properties
 struct Device => {
     serial => '$',
     manufacturer => '$',
@@ -66,6 +70,7 @@ struct Device => {
     rooted => '$',
 };
 
+# 'Settings' structure contains various settings using by this script
 struct Settings => {
     BackupSystemApps => '$',
     BackupData => '$',
@@ -78,16 +83,25 @@ struct Settings => {
     InstallSD => '$',
     UseNewADBCmd => '$',
     ConfirmActions => '$',
+    OnlyBaseAPK => '$',
 };
 
 # Android System Namespaces used by different manufacturers
 # Update this array as required
 my @SYSTEM_NAMESPACE = 
 (
-    "com.android", "com.sec", "com.google", "com.cyanogenmod", 
-    "com.sonyericsson", "com.motorola", "com.htc", "com.samsung",  
-    "com.lge", "com.huawei", "com.zte", "com.sony"
+    #"com.google",
+    "com.android", "com.sec",
+    "com.cyanogenmod",
+    "org.codeaurora", "com.qti", "com.qualcomm.qti",
+    "com.sonyericsson", "com.motorola", "com.htc", "com.samsung",
+    "com.lge", "com.huawei", "com.zte", "com.sony",
+    "com.asus"
 );
+
+# Enable for debug prints
+my $DEBUG = 0;
+my $DEBUG_PACKAGES = 0;
 
 my $settings = Settings->new();
 my @ADB_DEVICES;
@@ -114,8 +128,11 @@ my $SYNC_DIRECTORY = "./SyncData";
 # Backup directory
 my $BACKUP_DIRECTORY = "./Backup";
 
-# ICS version
+# Android versions
+# ICS
 my $VERSION_ICS = version->declare("4.0.0");
+# Pie
+my $VERSION_PIE = version->declare("9.0.0");
 
 my $SYNC_DEVICE_MASTER = "";
 my $SYNC_DEVICE_SLAVE = "";
@@ -125,15 +142,34 @@ my $SERIAL_DEVICE_SLAVE = "";
 
 my $choice = " ";
 
+# Print debug messages
+sub printD
+{
+    my $dbgMessage = shift;
+
+    if ($DEBUG == 1) {
+        print "DEBUG: " . $dbgMessage . "\n";
+    }
+}
+
 # Print out a banner for information
 sub PrintBanner
 {
-    print "\nAndSync v1.4 - Sync your Andorid devices";
-    print "\nCopyright (C) 2012-2014, Winny Mathew Kurian (WiZarD)\n";
+    print "\nAndSync v1.5 - Sync your Andorid devices";
+    print "\nCopyright (C) 2012-2020, Winny Mathew Kurian (WiZarD)\n";
+}
+
+sub CheckExec
+{
+    my $check = `sh -c 'command -v $_[0]'`; 
+    return $check;
 }
 
 # Print one time banner
 PrintBanner();
+
+# Check if we have pre-requisites installed
+CheckExec('adb') or die "\nPre-requisite missing: adb\n";
 
 # Make sure an instance of ADB server is running before we start
 system("adb start-server");
@@ -274,6 +310,7 @@ sub WriteSettings
     print hSettingsFile "DeleteCompleted=" . $settings->DeleteCompleted . "\n";
     print hSettingsFile "InstallSD=" . $settings->InstallSD . "\n";
     print hSettingsFile "UseNewADBCmd=" . $settings->UseNewADBCmd . "\n";
+    print hSettingsFile "OnlyBaseAPK=" . $settings->OnlyBaseAPK . "\n";
     print hSettingsFile "ConfirmActions=" . $settings->ConfirmActions . "\n";
 
     close (hSettingsFile);
@@ -305,16 +342,18 @@ sub SettingsMain
             $settings->InstallSD ? "Yes" : "No";
         printf "10. Use new backup-restore (above GB)   [%4s ]\n",
             $settings->UseNewADBCmd ? "Yes" : "No";
-        printf "11. Confirm all actions                 [%4s ]\n",
+        printf "11. Backup only Base APK (above Oreo)   [%4s ]\n",
+            $settings->OnlyBaseAPK ? "Yes" : "No";
+        printf "12. Confirm all actions                 [%4s ]\n",
             $settings->ConfirmActions ? "Yes" : "No";
-        printf "12. Update this script\n";
-        printf "13. About AndSync\n";
-        printf "\n[0-13]> ";
+        printf "13. Update this script\n";
+        printf "14. About AndSync\n";
+        printf "\n[0-14]> ";
 
         chomp($choice = <STDIN>);
         redo if not isNumber($choice);
-        if ($choice < 0 || $choice > 13) {
-            print "\nPlease enter a menu option (0-13)\n";
+        if ($choice < 0 || $choice > 14) {
+            print "\nPlease enter a menu option (0-14)\n";
             redo;
         }
 
@@ -354,12 +393,15 @@ sub SettingsMain
             $settings->UseNewADBCmd($settings->UseNewADBCmd ? 0 : 1);
         }
         elsif ($choice == 11) {
-            $settings->ConfirmActions($settings->ConfirmActions ? 0 : 1);
+            $settings->OnlyBaseAPK($settings->OnlyBaseAPK ? 0 : 1);
         }
         elsif ($choice == 12) {
-            PerformSelfUpdate();
+            $settings->ConfirmActions($settings->ConfirmActions ? 0 : 1);
         }
         elsif ($choice == 13) {
+            PerformSelfUpdate();
+        }
+        elsif ($choice == 14) {
             # Open self and print out GNU Copyright notice
             open SELF, __FILE__ or redo;
             while (<SELF>) {
@@ -435,7 +477,7 @@ sub RefreshDeviceList
         $PROP_MANUFACTURER      = `adb -s $SERIAL shell getprop ro.product.manufacturer`;
         $PROP_PROD_MODEL        = `adb -s $SERIAL shell getprop ro.product.model`;
         $PROP_ANDROID_VERSION   = `adb -s $SERIAL shell getprop ro.build.version.release`;
-        $IS_ROOTED              = `adb -s $SERIAL shell ls /system/xbin/su`;
+        $IS_ROOTED              = `adb -s $SERIAL shell ls /system/xbin/su 2>/dev/null`;
 
         # Remove all newlines
         $PROP_MANUFACTURER =~ s/\R//g;
@@ -484,16 +526,17 @@ sub DisplayDevices
 
 # Checks if the given app is a system app (Not very amazing, but no other way now)
 #
-# The array here needs to be updated as required or this sub-routine has to be
-# replaced with a better one.
+# The package is marked as system if we find this is a system application
 #
-sub isSystemApp
+sub MarkSystemApp
 {
-    my $packageName = shift;
+    my $package = shift;
+    my $packageName = $package->name;
+    my $packagePath = $package->path;
     my $bSys = 0;
 
     # Mark framework-res apk as a system app
-    if ($packageName =~ /^android/) {
+    if (($packageName =~ /^android/) || ($packagePath =~ /^\/system\/app|priv-app/)) {
         $bSys = 1;
     }
     else {
@@ -505,6 +548,7 @@ sub isSystemApp
         }
     }
 
+    $package->system($bSys);
     return $bSys;
 }
 
@@ -575,6 +619,7 @@ sub RestoreDevice
     my $packageBaseName;
     my $VersionDev;
     my @apk_files;
+    my $package = Package->new();
 
     return if ($ADB_DEVICES_COUNT < 1);
 
@@ -640,7 +685,10 @@ sub RestoreDevice
     if (ConfirmPrompt("\nProceed with restore")) {
         foreach my $packageName (@apk_files) {
             if (not $settings->RestoreSystemApps) {
-                next if isSystemApp($packageName);
+                $package->name($packageName);
+                $package->path(""); # FIXME
+                MarkSystemApp($package);
+                next if $package->system;
             }
 
             $packageBaseName = basename("$packageName");
@@ -758,6 +806,7 @@ sub RetriveDeviceReport
 {
     $SERIAL = $_[0];
     my $UPDATE = 1;
+    my $VersionDev;
 
     if (-e "$SYNC_DIRECTORY/$SERIAL.txt") {
         $UPDATE = not ConfirmPrompt("\nSync data found for $SERIAL. Use this?");
@@ -765,7 +814,24 @@ sub RetriveDeviceReport
 
     if ($UPDATE) {
         print "\nRetriving device and application details from $SERIAL...\n";
-        system ("adb -s $SERIAL bugreport > $SYNC_DIRECTORY/$SERIAL.txt");
+
+        $VersionDev = GetDeviceProperty($SERIAL, "android");
+	if ($VersionDev < $VERSION_PIE) {
+            system("adb -s $SERIAL bugreport > $SYNC_DIRECTORY/$SERIAL.txt");
+        } else {
+            # Newer bugreports are packaged as zip file and we need to
+	    # unzip them to get the txt version of bug report
+            if (not -d "$SYNC_DIRECTORY/$SERIAL") {
+                mkdir "$SYNC_DIRECTORY/$SERIAL";
+            }
+
+            if (not -e "$SYNC_DIRECTORY/$SERIAL/$SERIAL.zip") {
+                system("adb -s $SERIAL bugreport $SYNC_DIRECTORY/$SERIAL/$SERIAL.zip");
+            }
+
+            system("unzip -q -o $SYNC_DIRECTORY/$SERIAL/$SERIAL.zip -d $SYNC_DIRECTORY/$SERIAL");
+            system("mv `find $SYNC_DIRECTORY/$SERIAL -name bugreport-*.txt` $SYNC_DIRECTORY/$SERIAL.txt");
+        }
     }
 }
 
@@ -822,7 +888,7 @@ sub PushPackages
         if (ConfirmPrompt("\nUpdate $packageName")) {
 
             if (not $settings->RestoreSystemApps) {
-                next if isSystemApp($packageName);
+                next if $packageUpdate->system;
             }
 
             print "\nUpdating $packageName\n";
@@ -880,16 +946,52 @@ sub PullPackages
     my $dataPath;
     my $nPackages = 0;
     my $rooted = isDeviceRooted($SERIAL_DEVICE_MASTER);
+    my $VersionDev;
+    my $cmdPull;
+
+    $VersionDev = GetDeviceProperty($SERIAL, "android");
+
+    # Pie and above keeps application and libraries in its own directories
+    # So create a directory per device serial
+    if ($VersionDev >= $VERSION_PIE) {
+        if (not -d "$DIRECTORY/$SERIAL_DEVICE_MASTER") {
+            mkdir "$DIRECTORY/$SERIAL_DEVICE_MASTER"; 
+        }
+    }
 
     while(my ($packageName, $packageUpdate) = each(%phashUpdate)) {
         $apkPath = $packageUpdate->path;
 
         if (not $settings->BackupSystemApps) {
-            next if isSystemApp($packageName);
+            next if $packageUpdate->system;
         }
 
+        if ($VersionDev >= $VERSION_PIE) {
+            if ($settings->OnlyBaseAPK) {
+                if ($packageUpdate->system) {
+                    $apkPath = $apkPath . "/" . basename("$apkPath") . ".apk";
+                } else {
+                    $apkPath = $apkPath . "/base.apk";
+                }
+            }
+        }
+
+        $cmdPull = "adb -s $SERIAL_DEVICE_MASTER pull $apkPath $DIRECTORY/$SERIAL_DEVICE_MASTER/";
+
         print "\nRetriving package $apkPath\n";
-        system("adb -s $SERIAL_DEVICE_MASTER pull $apkPath $DIRECTORY/$SERIAL_DEVICE_MASTER/$packageName.apk");
+        if ($VersionDev < $VERSION_PIE) {
+            $cmdPull = $cmdPull . "$packageName.apk";
+        } else {
+            if ($settings->OnlyBaseAPK) {
+                $cmdPull = $cmdPull . "$packageName.apk";
+            } else {
+                $cmdPull = $cmdPull . "$packageName";
+            }
+        }
+
+        printD("ADB Pull Command: $cmdPull");
+        system($cmdPull);
+
         if ($? < 0) {
             print "\n[Error] While retriving package: $packageName. Continuing...\n";
             next;
@@ -940,7 +1042,7 @@ sub UninstallPackages
     while(my ($packageName, $packageUninstall) = each(%phashUninstall)) {
         if (ConfirmPrompt("Uninstall $packageName")) {
             # We do not un-install system apps!
-            next if isSystemApp($packageName);
+            next if $packageUninstall->system;
 
             print "\nUn-installing $packageName\n";
             system("adb -s $SERIAL uninstall $KeepData $packageName");
@@ -998,7 +1100,7 @@ sub ResolvePackageSync
         $packageSlave = $phashSlave {$packageMaster->name};
 
         # Ignore system apps when syncing
-        next if isSystemApp($packageMaster->name);
+        next if $packageMaster->system;
 
         if ($packageSlave)
         {
@@ -1009,10 +1111,12 @@ sub ResolvePackageSync
                 # Add packages to be updated to hash
                 $phash{ $packageMaster->name } = $packageMaster;
 
-                # Uncomment for debugging
-                #DbgPrintPackage($packageSlave);
-                #DbgPrintPackage($packageMaster);
+                if ($DEBUG_PACKAGES == 1) {
+                    DbgPrintPackage($packageSlave);
+                    DbgPrintPackage($packageMaster);
+                }
 
+                # Uncomment for debugging
                 # Reset package contents
                 #ResetPackageStruct($packageSlave);
                 #ResetPackageStruct($packageMaster);
@@ -1050,6 +1154,7 @@ sub ParseSettings
         $settings->DeleteCompleted(0);
         $settings->InstallSD(0);
         $settings->UseNewADBCmd(1);
+        $settings->OnlyBaseAPK(0);
         $settings->ConfirmActions(1);
 
         WriteSettings();
@@ -1129,6 +1234,13 @@ sub ParseSettings
             $settings->UseNewADBCmd($value);
             next;
         }
+        if (/OnlyBaseAPK=/) {
+            $value = $_;
+            chomp($value);
+            ($key, $value) = split(/=/, $value);
+            $settings->OnlyBaseAPK($value);
+            next;
+        }
         if (/DeleteCompleted=/) {
             $value = $_;
             chomp($value);
@@ -1147,6 +1259,21 @@ sub ParseADBReport
 {
     my $SERIAL = $_[0];
     my $STRING_KV;
+    my $VersionDev;
+    my $LenParsePkgHex;
+    my $LenParsePkgName;
+    my $pkgParserCode = 0;
+    my $pkgNextParserCode = 1;
+    my $parseSuccess = 1;
+
+    $VersionDev = GetDeviceProperty($SERIAL, "android");
+    if ($VersionDev < $VERSION_PIE) {
+        $LenParsePkgHex = 8;
+        $LenParsePkgName = -13
+    } else {
+        $LenParsePkgHex = 6;    #FIXME: Hard coded
+        $LenParsePkgName = -12
+    }
 
     open(hReportFile, "$SYNC_DIRECTORY/$SERIAL.txt") or die "Could not open $SERIAL.txt!\n";
 
@@ -1155,13 +1282,48 @@ sub ParseADBReport
 
     while (<hReportFile>)
     {
-        if (/  Package \[[\d\S]+\] \(*[a-f0-9]{8,}\):/i) {
+        # If parsing went off track then reset progress
+        if (($parseSuccess == 1) && ($pkgParserCode != $pkgNextParserCode)) {
+            $pkgParserCode = 0;
+            $pkgNextParserCode = 0;
+            ResetPackageStruct($package);
+        }
+
+	# Parser code will be 5 if all entries are parsed in order
+        # This means we have all data needed for the package and we can update 
+        if ($pkgParserCode == 5) {
+            # Update package properties like system application or other stuff we need
+            MarkSystemApp($package);
+
+            if ($DEBUG_PACKAGES == 1) {
+                DbgPrintPackage($package);
+            }
+
+            # Add package structure to hash
+            $phash{ $package->name } = $package;
+
+            # Create a new package instance and reset progress
+            $package = Package->new();
+            $pkgNextParserCode = 0;
+            next;
+        }
+
+        if ($parseSuccess == 1) {
+            $pkgNextParserCode += 1;
+            $parseSuccess = 0;
+        }
+
+        if (/  Package \[[\d\S]+\] \(*[a-f0-9]{6,}\):/i) {
             $STRING_KV = $_;
             # Remove CR-LF to make substr work same on all systems
             $STRING_KV =~ s/\R//g;
             chomp($STRING_KV);
-            $STRING_KV = substr($STRING_KV, 11, -13);
+	    $STRING_KV = substr($STRING_KV, 11, $LenParsePkgName);
             $package->name($STRING_KV);
+            $pkgParserCode = 1;
+            $parseSuccess = 1;
+
+            printD($package->name);
             next;
         }
         if (/    codePath=/) {
@@ -1169,6 +1331,10 @@ sub ParseADBReport
             chomp($STRING_KV);
             $STRING_KV = substr($STRING_KV, 13);
             $package->path($STRING_KV);
+            $pkgParserCode = 2;
+            $parseSuccess = 1;
+
+            printD($package->path);
             next;
         }
         if (/    versionCode=/) {
@@ -1179,6 +1345,10 @@ sub ParseADBReport
             # if so strip it off (get only first element)
             $STRING_KV = (split / /, $STRING_KV)[0];
             $package->version_code($STRING_KV);
+            $pkgParserCode = 3;
+            $parseSuccess = 1;
+
+            printD($package->version_code);
             next;
         }
         if (/    versionName=/) {
@@ -1186,6 +1356,10 @@ sub ParseADBReport
             chomp($STRING_KV);
             $STRING_KV = substr($STRING_KV, 16);
             $package->version_name($STRING_KV);
+            $pkgParserCode = 4;
+            $parseSuccess = 1;
+
+            printD($package->version_name);
             next;
         }
         if (/    dataDir=/) {
@@ -1193,20 +1367,14 @@ sub ParseADBReport
             chomp($STRING_KV);
             $STRING_KV = substr($STRING_KV, 12);
             $package->data_path($STRING_KV);
+            $pkgParserCode = 5;
+            $parseSuccess = 1;
+
+            printD($package->data_path);
             next;
         }
 
-        if ($package->name && $package->path && $package->version_code && $package->version_name) {
-            # Uncomment the following code for debugging
-            # DbgPrintPackage($package);
-
-            # Add package structure to hash
-            $phash{ $package->name } = $package;
-
-            # Create a new package instance;
-            $package = Package->new();
-            ResetPackageStruct($package);
-        }
+        $parseSuccess = 0;
     }
 
     # Close the ADB report file and return the package hash created
@@ -1233,9 +1401,10 @@ sub DbgPrintPackage
 
     print "Package\n";
     print "--Name: " . $package->name . "\n";
+    print "--System: " . $package->system . "\n";
     print "--Path: " . $package->path . "\n";
     print "--Version Code: " . $package->version_code . "\n";
-    print "--Version Name: " . $package->version_name . "\n\n";
+    print "--Version Name: " . $package->version_name . "\n";
     print "--Data Path: " . $package->data_path . "\n\n";
 }
 

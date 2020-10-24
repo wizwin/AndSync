@@ -41,3 +41,15 @@ AndSync - CHANGELOG
 [v1.4] 12.04.2014
 
 * Fixed parsing errors for ADB reports generated on newer phones.
+
+[v1.5] 18.10.2020
+
++ Added support for Pie bugreport and above.
+  ^ Enhanced bug report parsing for new verion of bugreports.
+^ Added check for adb command.
+^ Added more support for debugging.
+^ Added support for only base APK backup.
+^ Added more debugging support. printD function added.
+* Fixed package parser with proper states.
+^ Added more namespaces for system apps.
+
