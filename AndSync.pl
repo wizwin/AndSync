@@ -25,7 +25,7 @@
 # Prerequisites
 #  OS           - Any OS
 #  Android SDK  - ADB shell
-#                 $ sudu apt install adb (on 20.04)
+#                 $ sudo apt install adb (on 20.04)
 #  Perl         - Class::Struct File::Path File::Basename File::Fetch 
 #                 File::Copy Archive::Zip, (File::Fetch->Version)
 #                 $ sudo perl -MCPAN -e shell
